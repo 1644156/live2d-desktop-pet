@@ -1,0 +1,47 @@
+﻿# 澶фā鍨嬮厤缃枃浠?# 浠呴渶淇敼涓変釜鍙傛暟鍗冲彲鍒囨崲妯″瀷
+
+# 閫氫箟鍗冮棶 (榛樿)
+api_key: "your-dashscope-api-key"
+base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+model_name: "qwen-plus"
+
+# 閫氱敤鍙傛暟
+temperature: 0.85
+
+# ===== 鍚戦噺宓屽叆妯″瀷閰嶇疆 =====
+embedding:
+  enabled: true
+  # ModelScope 妯″瀷锛堝浗鍐呰闂揩锛?  model: "BAAI/bge-base-zh-v1.5"
+  # 鍏朵粬鍙€?ModelScope 妯″瀷锛?  # model: "iic/nlp_gte_sentence-embedding_chinese-large"
+  # model: "damo/nlp_corom_sentence-embedding_chinese-base"
+  # model: "BAAI/bge-m3"  # 2GB锛屾晥鏋滄渶浣充絾杈冩參
+
+# ===== 璇煶鍚堟垚閰嶇疆 =====
+tts:
+  enabled: false
+  speech_mode: "zh"
+  voice_file: "闊宠壊.wav"
+  voice_file_ja: "鏃ヨ.wav"
+  preferred_name: "live2d_pet"
+
+reminder:
+  check_interval_ms: 10000
+  max_todos: 50
+  min_interval_minutes: 5
+
+# ===== 鐭ヨ瘑搴撻厤缃?=====
+knowledge_base:
+  chunk_size: 512
+  chunk_overlap: 64
+
+# ===== 鍏朵粬妯″瀷閰嶇疆绀轰緥 =====
+# DeepSeek:
+#   api_key: "your-deepseek-api-key"
+#   base_url: "https://api.deepseek.com/v1"
+#   model_name: "deepseek-chat"
+
+# OpenAI:
+#   api_key: "your-openai-api-key"
+#   base_url: "https://api.openai.com/v1"
+#   model_name: "gpt-4o-mini"
+
