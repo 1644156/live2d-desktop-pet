@@ -391,6 +391,7 @@ live2d-desktop-pet/
 - [pixi-live2d-display](https://github.com/pixijs/pixi-live2d-display) - Live2D 渲染库
 - [LangChain](https://github.com/langchain-ai/langchain) - LLM 应用框架
 - [ChromaDB](https://github.com/chroma-core/chroma) - 向量数据库
+- [vsllm](https://vsllm.com) - 模型支持
 - 所有贡献者和用户
 
 ---
