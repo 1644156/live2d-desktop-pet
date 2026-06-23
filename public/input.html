@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: transparent;
+            overflow: hidden;
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            -webkit-user-select: none;
+        }
+
+        #root {
+            width: 320px;
+            height: 80px;
+            transform-origin: top left;
+        }
+        
+        .drag-handle {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 8px;
+            cursor: grab;
+            z-index: 10;
+        }
+        
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+        
+        .input-container {
+            display: flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 25px;
+            padding: 8px 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            gap: 8px;
+            height: 50px;
+            margin-top: 6px;
+        }
+        
+        .input-wrapper {
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+        
+        #user-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 14px;
+            color: #333;
+            background: transparent;
+            padding: 4px 8px;
+        }
+        
+        #user-input::placeholder {
+            color: #999;
+        }
+        
+        #send-btn {
+            border: none;
+            background: #667eea;
+            color: white;
+            border-radius: 20px;
+            padding: 6px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        
+        #send-btn:hover:not(:disabled) {
+            background: #5a6fd6;
+            transform: scale(1.02);
+        }
+        
+        #send-btn:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+        
+        #send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .input-container:focus-within {
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+    <div id="root">
+        <div class="drag-handle" id="drag-handle"></div>
+        <div class="input-container" id="input-container">
+            <div class="input-wrapper">
+                <input type="text" id="user-input" placeholder="和我聊聊吧～" maxlength="200">
+            </div>
+            <button id="send-btn" disabled>发送</button>
+        </div>
+    </div>
+    
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        let pyBridge = null;
+        const input = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const dragHandle = document.getElementById('drag-handle');
+        const inputContainer = document.getElementById('input-container');
+        
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            pyBridge = channel.objects.pyBridge;
+        });
+        
+        function updateSendButton() {
+            sendBtn.disabled = input.value.trim() === '';
+        }
+        
+        function sendMessage() {
+            var text = input.value.trim();
+            if (text && pyBridge) {
+                pyBridge.onUserMessage(text);
+                input.value = '';
+                updateSendButton();
+            }
+        }
+        
+        input.addEventListener('input', function() {
+            updateSendButton();
+        });
+        
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !sendBtn.disabled) {
+                sendMessage();
+            }
+        });
+        
+        sendBtn.addEventListener('click', sendMessage);
+        
+        function focusInput() {
+            input.focus();
+        }
+        
+        function clearInput() {
+            input.value = '';
+            updateSendButton();
+        }
+
+        function setUiScale(scale) {
+            const parsed = Number(scale);
+            if (!parsed || parsed < 1) {
+                return;
+            }
+            const root = document.getElementById('root');
+            root.style.transform = 'scale(' + parsed + ')';
+        }
+
+        function setEnabled(enabled) {
+            input.disabled = !enabled;
+            sendBtn.disabled = !enabled || input.value.trim() === '';
+            if (!enabled) {
+                inputContainer.style.opacity = '0.6';
+                input.placeholder = '语音加载中...';
+            } else {
+                inputContainer.style.opacity = '1';
+                input.placeholder = '和我聊聊吧～';
+                updateSendButton();
+            }
+        }
+
+        // 拖拽功能
+        dragHandle.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            dragStartX = e.screenX;
+            dragStartY = e.screenY;
+            if (pyBridge && pyBridge.onDragStart) {
+                pyBridge.onDragStart();
+            }
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            
+            var deltaX = e.screenX - dragStartX;
+            var deltaY = e.screenY - dragStartY;
+            
+            if (pyBridge && pyBridge.onDragMove) {
+                pyBridge.onDragMove(deltaX, deltaY);
+            }
+            
+            dragStartX = e.screenX;
+            dragStartY = e.screenY;
+        });
+        
+        document.addEventListener('mouseup', function(e) {
+            if (isDragging) {
+                isDragging = false;
+                if (pyBridge && pyBridge.onDragEnd) {
+                    pyBridge.onDragEnd();
+                }
+            }
+        });
+
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            if (pyBridge && pyBridge.onContextMenu) {
+                pyBridge.onContextMenu();
+            }
+        });
+    </script>
+</body>
+</html>

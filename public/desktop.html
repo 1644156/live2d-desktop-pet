@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; }
+        body { 
+            background: transparent; 
+            overflow: hidden;
+        }
+        #canvas {
+            background: transparent;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script src="../src/utils/live2dcubismcore.min.js"></script>
+    <script src="../src/utils/pixi.min.js"></script>
+    <script src="../src/utils/cubism4.min.js"></script>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        window.PIXI = PIXI;
+
+        const canvas = document.getElementById('canvas');
+        const BASE_CANVAS_WIDTH = 400;
+        const BASE_CANVAS_HEIGHT = 500;
+        let viewScale = 1;
+        let modelNaturalWidth = 0;
+        let modelNaturalHeight = 0;
+
+        let model = null;
+        let pyBridge = null;
+
+        let expressions = [];
+        let motions = {};
+        let pendingAssets = null;
+
+        let idleTimer = null;
+        let isModelBusy = false;
+
+        const app = new PIXI.Application({
+            view: canvas,
+            width: BASE_CANVAS_WIDTH,
+            height: BASE_CANVAS_HEIGHT,
+            backgroundAlpha: 0,
+            resolution: window.devicePixelRatio || 1,
+            autoDensity: true
+        });
+
+        updateCanvasSize();
+
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            pyBridge = channel.objects.pyBridge;
+            pyBridge.onReady();
+        });
+
+        async function loadModel(modelPath) {
+            try {
+                if (model) {
+                    app.stage.removeChild(model);
+                    model.destroy();
+                    model = null;
+                }
+
+                expressions = [];
+                motions = {};
+
+                stopIdleLoop();
+
+                model = await PIXI.live2d.Live2DModel.from(modelPath, {
+                    autoInteract: false
+                });
+
+                app.stage.addChild(model);
+                model.anchor.set(0.5, 1);
+                model.scale.set(1);
+                modelNaturalWidth = model.width;
+                modelNaturalHeight = model.height;
+                updateModelLayout();
+
+                if (model.internalModel.expressionManager && 
+                    model.internalModel.expressionManager.definitions) {
+                    const expDefs = model.internalModel.expressionManager.definitions;
+                    if (expDefs) {
+                        if (Array.isArray(expDefs)) {
+                            expressions = expDefs.map(exp => exp.Name);
+                        } else {
+                            expressions = Object.keys(expDefs);
+                        }
+                    }
+                }
+
+                if (model.internalModel.motionManager && 
+                    model.internalModel.motionManager.definitions) {
+                    motions = {};
+                    const definitions = model.internalModel.motionManager.definitions;
+                    for (const group in definitions) {
+                        if (definitions[group] && definitions[group].length > 0) {
+                            motions[group] = definitions[group].map((_, i) => `${group}_${i}`);
+                        }
+                    }
+                }
+
+                model.on('hit', (hitAreas) => {
+                    if (hitAreas.includes('Head')) {
+                        model.expression();
+                        if (pyBridge) pyBridge.onHit('Head');
+                    } else if (hitAreas.includes('Body')) {
+                        if (motions['TapBody'] && motions['TapBody'].length > 0) {
+                            const randomIndex = Math.floor(Math.random() * motions['TapBody'].length);
+                            model.motion('TapBody', randomIndex);
+                        } else if (motions['Idle'] && motions['Idle'].length > 0) {
+                            const randomIndex = Math.floor(Math.random() * motions['Idle'].length);
+                            model.motion('Idle', randomIndex);
+                        }
+                        if (pyBridge) pyBridge.onHit('Body');
+                    }
+                });
+
+                startIdleLoop();
+
+                if (pendingAssets) {
+                    doInjectAssets(pendingAssets);
+                    pendingAssets = null;
+                }
+
+                // 检测模型口型能力
+                detectMouthCapabilities();
+
+                if (pyBridge) {
+                    pyBridge.onModelLoaded();
+                    const metadata = JSON.stringify({ expressions, motions });
+                    pyBridge.onMetadataReady(metadata);
+                }
+            } catch (error) {
+                console.error('Load failed:', error);
+                if (pyBridge) pyBridge.onLoadError(error.message);
+            }
+        }
+
+        function triggerBlinkViaParameter() {
+            if (!model || !model.internalModel || !model.internalModel.coreModel) {
+                return false;
+            }
+
+            const coreModel = model.internalModel.coreModel;
+            
+            const eyeParams = [
+                ['ParamEyeLOpen', 'ParamEyeROpen'],
+                ['ParamEyeOpen', 'ParamEyeOpen'],
+                ['EyeLOpen', 'EyeROpen']
+            ];
+
+            let leftParam = null;
+            let rightParam = null;
+
+            for (const [left, right] of eyeParams) {
+                try {
+                    const leftIdx = coreModel.getParameterIndex(left);
+                    const rightIdx = coreModel.getParameterIndex(right);
+                    if (leftIdx >= 0 && rightIdx >= 0) {
+                        leftParam = left;
+                        rightParam = right;
+                        break;
+                    }
+                } catch (e) {
+                }
+            }
+
+            if (!leftParam || !rightParam) {
+                return false;
+            }
+
+            coreModel.setParameterValueById(leftParam, 0);
+            coreModel.setParameterValueById(rightParam, 0);
+
+            setTimeout(() => {
+                if (coreModel) {
+                    coreModel.setParameterValueById(leftParam, 1);
+                    coreModel.setParameterValueById(rightParam, 1);
+                }
+            }, 150);
+
+            return true;
+        }
+
+        function startIdleLoop() {
+            stopIdleLoop();
+            scheduleNextIdle();
+        }
+
+        function stopIdleLoop() {
+            if (idleTimer) {
+                clearTimeout(idleTimer);
+                idleTimer = null;
+            }
+        }
+
+        function scheduleNextIdle() {
+            if (isModelBusy) {
+                idleTimer = setTimeout(scheduleNextIdle, 1000);
+                return;
+            }
+
+            const delay = 2000 + Math.random() * 2000;
+            idleTimer = setTimeout(() => {
+                performRandomIdleAction();
+                scheduleNextIdle();
+            }, delay);
+        }
+
+        function performRandomIdleAction() {
+            const success = triggerBlinkViaParameter();
+            if (!success && motions['Idle'] && motions['Idle'].length > 0) {
+                const randomIndex = Math.floor(Math.random() * motions['Idle'].length);
+                model.motion('Idle', randomIndex);
+            }
+        }
+
+        function setModelBusy(busy) {
+            isModelBusy = busy;
+        }
+
+        function focusModel(x, y) {
+            if (model) model.focus(x, y);
+        }
+
+        function tapModel(x, y) {
+            if (model) model.tap(x, y);
+        }
+
+        function setExpression(name) {
+            if (model) {
+                if (name) {
+                    model.expression(name);
+                } else {
+                    model.expression();
+                }
+            }
+        }
+
+        function playMotion(group, index) {
+            if (model) {
+                if (index !== undefined && index !== null) {
+                    model.motion(group, index);
+                } else {
+                    model.motion(group);
+                }
+            }
+        }
+
+        // ========== 口型能力检测 ==========
+        let mouthCapability = {
+            mode: 'unsupported',
+            openParam: null,
+            formParam: null,
+            vowels: { a: null, i: null, u: null, e: null, o: null }
+        };
+
+        function detectMouthCapabilities() {
+            mouthCapability = { 
+                mode: 'unsupported', openParam: null, formParam: null,
+                vowels: { a: null, i: null, u: null, e: null, o: null }
+            };
+
+            if (!model || !model.internalModel || !model.internalModel.coreModel) {
+                return mouthCapability;
+            }
+
+            const coreModel = model.internalModel.coreModel;
+
+            const openCandidates = [
+                'ParamMouthOpenY',
+                'ParamA',
+                'PARAM_MOUTH_OPEN_Y',
+                'MouthOpenY',
+                'MouthOpen'
+            ];
+
+            const formCandidates = [
+                'ParamMouthForm',
+                'PARAM_MOUTH_FORM',
+                'MouthForm'
+            ];
+
+            const vowelNames = {
+                a: ['ParamMouthA', 'ParamA'],
+                i: ['ParamMouthI', 'ParamI'],
+                u: ['ParamMouthU', 'ParamU'],
+                e: ['ParamMouthE', 'ParamE'],
+                o: ['ParamMouthO', 'ParamO']
+            };
+
+            // 检测开合
+            for (const name of openCandidates) {
+                try {
+                    if (coreModel.getParameterIndex(name) >= 0) {
+                        mouthCapability.openParam = name;
+                        break;
+                    }
+                } catch (e) {}
+            }
+
+            // 检测变形
+            for (const name of formCandidates) {
+                try {
+                    if (coreModel.getParameterIndex(name) >= 0) {
+                        mouthCapability.formParam = name;
+                        break;
+                    }
+                } catch (e) {}
+            }
+
+            // 检测元音 (针对 Mao 等高级模型)
+            let foundVowels = 0;
+            for (let v in vowelNames) {
+                for (let name of vowelNames[v]) {
+                    try {
+                        if (coreModel.getParameterIndex(name) >= 0) {
+                            mouthCapability.vowels[v] = name;
+                            foundVowels++;
+                            break;
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            // 确定模式优先级：元音 > 变形 > 仅开合
+            if (foundVowels >= 3) {
+                mouthCapability.mode = 'full_viseme';
+            } else if (mouthCapability.openParam && mouthCapability.formParam) {
+                mouthCapability.mode = 'open_form';
+            } else if (mouthCapability.openParam) {
+                mouthCapability.mode = 'open_only';
+            } else {
+                mouthCapability.mode = 'unsupported';
+            }
+
+            console.log('[LipSync] 增强型口型能力:', JSON.stringify(mouthCapability));
+            return mouthCapability;
+        }
+
+        // ========== 实时口型同步 ==========
+        let currentMouthOpenY = 0;
+        let isSpeakingNow = false;
+        let originalMouthSyncReal = null;
+
+        function startRealLipSync() {
+            if (!model || !model.internalModel) return;
+            if (mouthCapability.mode === 'unsupported') return;
+
+            const im = model.internalModel;
+            const mm = im.motionManager;
+
+            im.lipSync = true;
+            mm.currentAudio = { ended: false, _fake: true };
+
+            originalMouthSyncReal = mm.mouthSync ? mm.mouthSync.bind(mm) : null;
+            mm.mouthSync = function() {
+                return currentMouthOpenY;
+            };
+
+            isSpeakingNow = true;
+        }
+
+        function stopRealLipSync() {
+            if (!model || !model.internalModel) return;
+            const mm = model.internalModel.motionManager;
+
+            if (mm.currentAudio && mm.currentAudio._fake) {
+                mm.currentAudio = undefined;
+            }
+
+            if (originalMouthSyncReal) {
+                mm.mouthSync = originalMouthSyncReal;
+                originalMouthSyncReal = null;
+            }
+
+            currentMouthOpenY = 0;
+            isSpeakingNow = false;
+
+            const core = model.internalModel.coreModel;
+            if (!core) return;
+
+            // 归零所有可能被我们修改的参数
+            if (mouthCapability.formParam) {
+                try { core.setParameterValueById(mouthCapability.formParam, 0); } catch (e) {}
+            }
+            if (mouthCapability.mode === 'full_viseme') {
+                for (let v in mouthCapability.vowels) {
+                    if (mouthCapability.vowels[v]) {
+                        try { core.setParameterValueById(mouthCapability.vowels[v], 0); } catch (e) {}
+                    }
+                }
+            }
+        }
+
+        function updateMouth(openY, mouthForm, vA, vI, vU, vE, vO) {
+            if (!isSpeakingNow) return;
+            if (mouthCapability.mode === 'unsupported') return;
+
+            const core = model.internalModel.coreModel;
+            if (!core) return;
+
+            // 1. 设置张开度 (由内部 mouthSync 每帧应用)
+            currentMouthOpenY = openY;
+
+            // 2. 根据能力应用细节
+            if (mouthCapability.mode === 'full_viseme') {
+                // 高级模式：驱动五个元音
+                const vs = mouthCapability.vowels;
+                if (vs.a) try { core.setParameterValueById(vs.a, vA * openY); } catch (e) {}
+                if (vs.i) try { core.setParameterValueById(vs.i, vI * openY); } catch (e) {}
+                if (vs.u) try { core.setParameterValueById(vs.u, vU * openY); } catch (e) {}
+                if (vs.e) try { core.setParameterValueById(vs.e, vE * openY); } catch (e) {}
+                if (vs.o) try { core.setParameterValueById(vs.o, vO * openY); } catch (e) {}
+            } else if (mouthCapability.mode === 'open_form') {
+                // 标准模式：驱动嘴变形
+                if (mouthCapability.formParam) {
+                    try { core.setParameterValueById(mouthCapability.formParam, mouthForm); } catch (e) {}
+                }
+            }
+        }
+
+        // ========== 旧接口（保留兼容） ==========
+        let lipSyncStartTime = 0;
+        let lipSyncDuration = 0;
+        let originalMouthSync = null;
+
+        function startLipSync(durationSec) {
+            if (!model || !model.internalModel) {
+                return;
+            }
+            stopLipSync();
+
+            const im = model.internalModel;
+            const mm = im.motionManager;
+
+            im.lipSync = true;
+            mm.currentAudio = { ended: false, _fake: true };
+
+            originalMouthSync = mm.mouthSync.bind(mm);
+            lipSyncStartTime = performance.now();
+            lipSyncDuration = durationSec * 1000;
+
+            mm.mouthSync = function() {
+                const elapsed = performance.now() - lipSyncStartTime;
+                if (elapsed >= lipSyncDuration) {
+                    stopLipSync();
+                    return 0;
+                }
+                const t = elapsed / 1000;
+                const value = Math.abs(
+                    Math.sin(t * 6.0) * 0.6 +
+                    Math.sin(t * 10.5) * 0.25 +
+                    Math.sin(t * 2.3) * 0.15
+                );
+                return Math.min(Math.max(value, 0), 1);
+            };
+        }
+
+        function stopLipSync() {
+            if (!model || !model.internalModel) return;
+            const mm = model.internalModel.motionManager;
+
+            if (mm.currentAudio && mm.currentAudio._fake) {
+                mm.currentAudio = undefined;
+            }
+
+            if (originalMouthSync) {
+                mm.mouthSync = originalMouthSync;
+                originalMouthSync = null;
+            }
+
+            lipSyncDuration = 0;
+        }
+
+        function getExpressions() {
+            return expressions;
+        }
+
+        function getMotions() {
+            return motions;
+        }
+
+        function getCanvasWidth() {
+            return Math.round(BASE_CANVAS_WIDTH * viewScale);
+        }
+
+        function getCanvasHeight() {
+            return Math.round(BASE_CANVAS_HEIGHT * viewScale);
+        }
+
+        function updateCanvasSize() {
+            const width = getCanvasWidth();
+            const height = getCanvasHeight();
+            canvas.width = width;
+            canvas.height = height;
+            app.renderer.resize(width, height);
+        }
+
+        function updateModelLayout() {
+            if (!model || !modelNaturalWidth || !modelNaturalHeight) {
+                return;
+            }
+            const width = getCanvasWidth();
+            const height = getCanvasHeight();
+            const fitScale = Math.min(
+                width / modelNaturalWidth,
+                height / modelNaturalHeight
+            ) * 0.85;
+            model.scale.set(fitScale);
+            model.x = width / 2;
+            model.y = height * 0.95;
+        }
+
+        function setViewScale(scale) {
+            const parsed = Number(scale);
+            if (!parsed || parsed < 1) {
+                return;
+            }
+            viewScale = parsed;
+            updateCanvasSize();
+            updateModelLayout();
+        }
+
+        function injectAssets(assetsJson) {
+            try {
+                const assets = JSON.parse(assetsJson);
+
+                if (!model || !model.internalModel) {
+                    pendingAssets = assets;
+                    return;
+                }
+
+                doInjectAssets(assets);
+            } catch (error) {
+                console.error('Failed to parse assets JSON:', error);
+            }
+        }
+
+        function doInjectAssets(assets) {
+            if (assets.expressions && assets.expressions.length > 0) {
+                const expressionManager = model.internalModel.expressionManager;
+                
+                if (expressionManager) {
+                    if (!expressionManager.definitions) {
+                        expressionManager.definitions = [];
+                    }
+                    
+                    const isDefinitionsArray = Array.isArray(expressionManager.definitions);
+                    
+                    for (const exp of assets.expressions) {
+                        if (isDefinitionsArray) {
+                            expressionManager.definitions.push(exp);
+                        } else {
+                            expressionManager.definitions[exp.Name] = exp;
+                        }
+                    }
+                }
+                
+                expressions = assets.expressions.map(exp => exp.Name);
+            }
+
+            if (assets.motions && Object.keys(assets.motions).length > 0) {
+                const motionManager = model.internalModel.motionManager;
+                
+                if (motionManager) {
+                    if (!motionManager.definitions) {
+                        motionManager.definitions = {};
+                    }
+                    
+                    for (const [group, motionList] of Object.entries(assets.motions)) {
+                        if (motionList && motionList.length > 0) {
+                            motionManager.definitions[group] = motionList;
+                        }
+                    }
+                }
+                
+                motions = {};
+                for (const group in assets.motions) {
+                    if (assets.motions[group] && assets.motions[group].length > 0) {
+                        motions[group] = assets.motions[group].map((_, i) => `${group}_${i}`);
+                    }
+                }
+            }
+
+            if (pyBridge) {
+                const metadata = JSON.stringify({ expressions, motions });
+                pyBridge.onMetadataReady(metadata);
+            }
+        }
+    </script>
+</body>
+</html>

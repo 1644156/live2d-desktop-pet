@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: transparent;
+        }
+
+        #root {
+            width: 420px;
+            height: 520px;
+            transform-origin: top left;
+        }
+
+        .panel {
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.97);
+            border-radius: 16px;
+            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            height: 48px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            flex-shrink: 0;
+            cursor: grab;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .header:active {
+            cursor: grabbing;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .close-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .close-btn:hover {
+            background: rgba(255, 255, 255, 0.35);
+        }
+
+        .stats-bar {
+            padding: 10px 16px;
+            background: #f5f3ff;
+            border-bottom: 1px solid #ede9fe;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .stats-text {
+            font-size: 12px;
+            color: #7c3aed;
+        }
+
+        .import-btn {
+            background: #6366f1;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .import-btn:hover {
+            background: #4f46e5;
+        }
+
+        .doc-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            background: #faf5ff;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .doc-list::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .doc-list::-webkit-scrollbar-thumb {
+            background: rgba(99, 102, 241, 0.35);
+            border-radius: 5px;
+        }
+
+        .doc-item {
+            background: #fff;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .doc-item:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .doc-icon {
+            font-size: 28px;
+            flex-shrink: 0;
+        }
+
+        .doc-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .doc-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #1e1b4b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .doc-meta {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+            flex-wrap: wrap;
+        }
+
+        .doc-badge {
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #eef2ff;
+            color: #6366f1;
+        }
+
+        .doc-badge.chunks {
+            background: #ecfdf5;
+            color: #059669;
+        }
+
+        .doc-badge.size {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
+        .doc-delete {
+            cursor: pointer;
+            color: #a0aec0;
+            transition: color 0.2s;
+            font-size: 16px;
+            padding: 4px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        .doc-item:hover .doc-delete {
+            opacity: 1;
+        }
+
+        .doc-delete:hover {
+            color: #e53e3e;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #a0aec0;
+            gap: 12px;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            opacity: 0.3;
+        }
+
+        .empty-text {
+            font-size: 14px;
+        }
+
+        .empty-hint {
+            font-size: 12px;
+            color: #c4b5fd;
+        }
+
+        /* 通知消息 */
+        .toast {
+            position: fixed;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            background: #1e1b4b;
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .toast.success {
+            background: #059669;
+        }
+
+        .toast.error {
+            background: #e53e3e;
+        }
+
+        /* 确认弹窗 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+        }
+
+        .modal-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-box {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px 24px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            transform: scale(0.9);
+            transition: transform 0.2s;
+            max-width: 300px;
+        }
+
+        .modal-overlay.show .modal-box {
+            transform: scale(1);
+        }
+
+        .modal-icon {
+            font-size: 36px;
+            margin-bottom: 12px;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 8px;
+        }
+
+        .modal-message {
+            font-size: 13px;
+            color: #718096;
+            margin-bottom: 20px;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .modal-btn {
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            transition: background 0.2s;
+        }
+
+        .modal-btn.cancel {
+            background: #edf2f7;
+            color: #4a5568;
+        }
+
+        .modal-btn.cancel:hover {
+            background: #e2e8f0;
+        }
+
+        .modal-btn.confirm {
+            background: #e53e3e;
+            color: #fff;
+        }
+
+        .modal-btn.confirm:hover {
+            background: #c53030;
+        }
+
+        /* 导入进度 */
+        .importing-overlay {
+            position: fixed;
+            top: 48px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 500;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            gap: 12px;
+        }
+
+        .importing-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid #e2e8f0;
+            border-top-color: #6366f1;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .importing-text {
+            font-size: 14px;
+            color: #6366f1;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+    <div id="root">
+        <div class="panel">
+            <div class="header">
+                <div class="header-title">
+                    <span>📚 知识库</span>
+                </div>
+                <button class="close-btn" onclick="pyBridge.onClose()">×</button>
+            </div>
+
+            <div class="stats-bar">
+                <span class="stats-text" id="stats-text">加载中...</span>
+                <button class="import-btn" onclick="pyBridge.openFileDialog()">
+                    <span>+</span> 导入文档
+                </button>
+            </div>
+
+            <div class="doc-list" id="doc-list">
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-icon">🗑️</div>
+            <div class="modal-title">确认删除</div>
+            <div class="modal-message" id="modal-message">确定要删除这个文档吗？</div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" onclick="hideModal()">取消</button>
+                <button class="modal-btn confirm" id="modal-confirm-btn">删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="importing-overlay" id="importing-overlay">
+        <div class="spinner"></div>
+        <div class="importing-text">正在导入文档...</div>
+    </div>
+
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        let pyBridge = null;
+        let uiScale = 1.0;
+        let pendingDeleteId = null;
+
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new QWebChannel(qt.webChannelTransport, (channel) => {
+                pyBridge = channel.objects.pyBridge;
+                loadDocuments();
+            });
+
+            const header = document.querySelector('.header');
+            header.addEventListener('mousedown', function(e) {
+                if (e.target.classList.contains('close-btn')) return;
+                isDragging = true;
+                dragStartX = e.screenX;
+                dragStartY = e.screenY;
+                if (pyBridge && pyBridge.onDragStart) {
+                    pyBridge.onDragStart();
+                }
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!isDragging) return;
+                var deltaX = e.screenX - dragStartX;
+                var deltaY = e.screenY - dragStartY;
+                if (pyBridge && pyBridge.onDragMove) {
+                    pyBridge.onDragMove(deltaX, deltaY);
+                }
+                dragStartX = e.screenX;
+                dragStartY = e.screenY;
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (!isDragging) return;
+                isDragging = false;
+                if (pyBridge && pyBridge.onDragEnd) {
+                    pyBridge.onDragEnd();
+                }
+            });
+
+            document.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+            });
+        });
+
+        function setUiScale(scale) {
+            uiScale = scale;
+            document.getElementById('root').style.transform = `scale(${scale})`;
+        }
+
+        function loadDocuments() {
+            if (!pyBridge) return;
+            pyBridge.getStats((statsJson) => {
+                try {
+                    const stats = typeof statsJson === 'string' ? JSON.parse(statsJson) : statsJson;
+                    document.getElementById('stats-text').textContent =
+                        `${stats.doc_count} 个文档 · ${stats.chunk_count} 个知识片段`;
+                } catch(e) {}
+            });
+
+            pyBridge.getDocuments((docsJson) => {
+                try {
+                    const docs = typeof docsJson === 'string' ? JSON.parse(docsJson) : docsJson;
+                    renderDocuments(docs);
+                } catch (e) {
+                    console.error("Failed to parse documents:", e);
+                }
+            });
+        }
+
+        function renderDocuments(docs) {
+            const list = document.getElementById('doc-list');
+            if (!docs || docs.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📚</div>
+                        <div class="empty-text">知识库还是空的</div>
+                        <div class="empty-hint">点击上方"导入文档"添加你的笔记和文档</div>
+                    </div>
+                `;
+                return;
+            }
+
+            list.innerHTML = docs.map(doc => {
+                const icon = getFileIcon(doc.file_name);
+                const sizeStr = formatFileSize(doc.file_size);
+                const timeStr = formatDate(doc.created_at);
+                return `
+                    <div class="doc-item" id="doc-${doc.id}">
+                        <div class="doc-icon">${icon}</div>
+                        <div class="doc-info">
+                            <div class="doc-name" title="${escapeHtml(doc.file_name)}">${escapeHtml(doc.file_name)}</div>
+                            <div class="doc-meta">
+                                <span class="doc-badge chunks">${doc.chunk_count} 片段</span>
+                                <span class="doc-badge size">${sizeStr}</span>
+                                <span class="doc-badge">${timeStr}</span>
+                            </div>
+                        </div>
+                        <span class="doc-delete" onclick="deleteDocument(${doc.id}, '${escapeHtml(doc.file_name)}')">✕</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getFileIcon(fileName) {
+            const ext = (fileName || '').split('.').pop().toLowerCase();
+            const icons = {
+                'pdf': '📕',
+                'docx': '📘',
+                'doc': '📘',
+                'md': '📗',
+                'markdown': '📗',
+                'txt': '📄'
+            };
+            return icons[ext] || '📄';
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let i = 0;
+            let size = bytes;
+            while (size >= 1024 && i < units.length - 1) {
+                size /= 1024;
+                i++;
+            }
+            return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            const now = new Date();
+            const isToday = d.toDateString() === now.toDateString();
+            if (isToday) {
+                return `今天 ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+            }
+            return `${(d.getMonth()+1)}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+        }
+
+        function deleteDocument(id, name) {
+            pendingDeleteId = id;
+            const displayName = name.length > 20 ? name.substring(0, 20) + '...' : name;
+            document.getElementById('modal-message').textContent = `确定要从知识库中删除「${displayName}」吗？`;
+            document.getElementById('modal-overlay').classList.add('show');
+            document.getElementById('modal-confirm-btn').onclick = confirmDelete;
+        }
+
+        function confirmDelete() {
+            if (pendingDeleteId && pyBridge) {
+                pyBridge.deleteDocument(pendingDeleteId, (success) => {
+                    if (success) {
+                        showToast('文档已删除', 'success');
+                        loadDocuments();
+                    } else {
+                        showToast('删除失败', 'error');
+                    }
+                });
+            }
+            hideModal();
+        }
+
+        function hideModal() {
+            document.getElementById('modal-overlay').classList.remove('show');
+            pendingDeleteId = null;
+        }
+
+        function showImportProgress() {
+            document.getElementById('importing-overlay').classList.add('show');
+        }
+
+        function updateImportProgress(current, total, filename) {
+            const text = document.querySelector('.importing-text');
+            if (text) {
+                text.textContent = `正在导入 (${current}/${total}): ${filename}`;
+            }
+        }
+
+        function hideImportProgress() {
+            document.getElementById('importing-overlay').classList.remove('show');
+        }
+
+        function onImportResults(results) {
+            hideImportProgress();
+            if (!results || results.length === 0) return;
+
+            let successCount = 0;
+            let failMessages = [];
+            for (const r of results) {
+                if (r.success) {
+                    successCount++;
+                } else {
+                    failMessages.push(r.message);
+                }
+            }
+
+            if (successCount > 0) {
+                showToast(`成功导入 ${successCount} 个文档`, 'success');
+            }
+            if (failMessages.length > 0) {
+                setTimeout(() => {
+                    showToast(failMessages[0], 'error');
+                }, successCount > 0 ? 2000 : 0);
+            }
+
+            loadDocuments();
+        }
+
+        function showToast(message, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + (type || '');
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2500);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

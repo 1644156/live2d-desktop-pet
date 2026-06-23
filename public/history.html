@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: transparent;
+        }
+
+        #root {
+            width: 380px;
+            height: 450px;
+            transform-origin: top left;
+        }
+
+        .panel {
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.97);
+            border-radius: 16px;
+            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            height: 48px;
+            background: linear-gradient(135deg, #667eea, #7f8cf8);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            position: relative;
+        }
+
+        .close-btn {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .close-btn:hover {
+            background: rgba(255, 255, 255, 0.35);
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 14px 12px;
+            background: #f6f8fc;
+        }
+
+        .content::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .content::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.35);
+            border-radius: 5px;
+        }
+
+        .row {
+            display: flex;
+            margin-bottom: 10px;
+            width: 100%;
+        }
+
+        .row.user {
+            justify-content: flex-end;
+        }
+
+        .row.assistant {
+            justify-content: flex-start;
+        }
+
+        .bubble {
+            max-width: 76%;
+            padding: 8px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            line-height: 1.5;
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+
+        .row.user .bubble {
+            background: #6c83f0;
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .row.assistant .bubble {
+            background: #fff;
+            color: #2f3442;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            border-bottom-left-radius: 4px;
+        }
+
+        .empty {
+            color: #9aa2b1;
+            text-align: center;
+            font-size: 13px;
+            margin-top: 50px;
+        }
+
+        .audio-list {
+            margin-top: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .audio-btn {
+            border: 1px solid rgba(108, 131, 240, 0.35);
+            background: rgba(108, 131, 240, 0.08);
+            color: #4a5fd6;
+            border-radius: 10px;
+            font-size: 12px;
+            padding: 2px 8px;
+            cursor: pointer;
+        }
+
+        .audio-btn:hover {
+            background: rgba(108, 131, 240, 0.16);
+        }
+
+        .audio-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .audio-pill {
+            min-width: 100px;
+            height: 28px;
+            border-radius: 14px;
+            border: none;
+            background: linear-gradient(135deg, #e8edff, #dce6ff);;
+            padding: 0 10px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            gap: 10px;
+        }
+
+        .audio-pill:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        .audio-pill:hover {
+            background: #ebebeb;
+        }
+
+        .wave {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 12px;
+            margin-left: 10px;
+        }
+
+        .bar {
+            width: 2px;
+            border-radius: 1px;
+            background: #111;
+        }
+
+        .play-icon {
+            width: 18px;
+            height: 18px;
+            background: #111;
+            border-radius: 50%;
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .play-icon::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 55%;
+            transform: translate(-40%, -50%);
+            width: 0;
+            height: 0;
+            border-top: 4px solid transparent;
+            border-bottom: 4px solid transparent;
+            border-left: 6px solid #fff;
+        }
+
+        .audio-dur {
+            font-size: 12px;
+            color: #888;
+            min-width: 32px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div class="panel">
+            <div class="header">
+                <span id="role-name">角色</span>
+                <button class="close-btn" id="close-btn">✕</button>
+            </div>
+            <div class="content" id="messages"></div>
+        </div>
+    </div>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        let pyBridge = null;
+
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            pyBridge = channel.objects.pyBridge;
+        });
+
+        document.getElementById('close-btn').addEventListener('click', function() {
+            if (pyBridge && pyBridge.onClose) {
+                pyBridge.onClose();
+            }
+        });
+
+        function renderHistory(records, roleName) {
+            var role = document.getElementById('role-name');
+            var container = document.getElementById('messages');
+            role.textContent = roleName || '角色';
+            container.innerHTML = '';
+
+            if (!Array.isArray(records) || records.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'empty';
+                empty.textContent = '暂无聊天记录';
+                container.appendChild(empty);
+                return;
+            }
+
+            for (var i = 0; i < records.length; i++) {
+                var item = records[i];
+                var roleType = item.role === 'user' ? 'user' : 'assistant';
+                var row = document.createElement('div');
+                row.className = 'row ' + roleType;
+
+                var bubble = document.createElement('div');
+                bubble.className = 'bubble';
+                var isAudio = item.kind === 'audio';
+                if (!isAudio) {
+                    bubble.textContent = item.content || '';
+                } else {
+                    var audioUrl = item.audio_data_url || '';
+                    if (!audioUrl) {
+                        continue;
+                    }
+                    var audioRow = document.createElement('div');
+                    audioRow.className = 'audio-row';
+                    var pill = document.createElement('button');
+                    pill.className = 'audio-pill';
+                    pill.dataset.audioUrl = audioUrl;
+                    pill.addEventListener('click', function(ev) {
+                        var targetUrl = ev.currentTarget.dataset.audioUrl;
+                        if (!targetUrl) {
+                            return;
+                        }
+                        var audio = new Audio(targetUrl);
+                        audio.play();
+                    });
+                    var icon = document.createElement('span');
+                    icon.className = 'play-icon';
+                    var wave = document.createElement('div');
+                    wave.className = 'wave';
+                    var duration = Number(item.audio_duration || 0);
+                    var barCount = Math.max(6, Math.min(20, Math.round(duration * 6) || 8));
+                    for (var b = 0; b < barCount; b++) {
+                        var bar = document.createElement('span');
+                        bar.className = 'bar';
+                        var h = 5 + Math.round(Math.abs(Math.sin((b + 1) * 1.27)) * 9);
+                        bar.style.height = h + 'px';
+                        wave.appendChild(bar);
+                    }
+                    pill.appendChild(icon);
+                    pill.appendChild(wave);
+                    var dur = document.createElement('span');
+                    dur.className = 'audio-dur';
+                    dur.textContent = duration > 0 ? duration.toFixed(1) + 's' : '--';
+                    audioRow.appendChild(pill);
+                    audioRow.appendChild(dur);
+                    bubble.appendChild(audioRow);
+                }
+                row.appendChild(bubble);
+                container.appendChild(row);
+            }
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function setUiScale(scale) {
+            const parsed = Number(scale);
+            if (!parsed || parsed < 1) {
+                return;
+            }
+            const root = document.getElementById('root');
+            root.style.transform = 'scale(' + parsed + ')';
+        }
+    </script>
+</body>
+</html>

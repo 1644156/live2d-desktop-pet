@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            background: transparent !important;
+            overflow: hidden;
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+        }
+
+        #root {
+            width: 340px;
+            transform-origin: top center;
+        }
+        
+        .bubble-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px;
+        }
+        
+        .bubble {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 12px 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 280px;
+            min-width: 60px;
+            min-height: 40px;
+            max-height: 300px;
+            position: relative;
+            animation: fadeIn 0.3s ease-out;
+            border: none;
+            outline: none;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        .bubble::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .bubble::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .bubble::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.4);
+            border-radius: 2px;
+        }
+        
+        .bubble::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.6);
+        }
+        
+        .bubble-text {
+            color: #333;
+            font-size: 14px;
+            line-height: 1.6;
+            word-wrap: break-word;
+            word-break: break-word;
+            text-align: center;
+            white-space: pre-wrap;
+        }
+        
+        .bubble-tail {
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-top: 12px solid rgba(255, 255, 255, 0.95);
+            margin-top: -4px;
+            filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
+        .thinking .bubble-text {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        .thinking-dots {
+            display: inline-flex;
+            gap: 4px;
+        }
+        
+        .thinking-dots span {
+            width: 6px;
+            height: 6px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: bounce 1.4s ease-in-out infinite;
+        }
+        
+        .thinking-dots span:nth-child(1) { animation-delay: 0s; }
+        .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+        
+        @keyframes bounce {
+            0%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-6px); }
+        }
+        
+        .cursor {
+            display: inline-block;
+            width: 2px;
+            height: 14px;
+            background: #667eea;
+            margin-left: 2px;
+            animation: blink 0.8s infinite;
+            vertical-align: middle;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+    <div id="root">
+        <div class="bubble-container" id="container">
+            <div class="bubble" id="bubble">
+                <div class="bubble-text" id="message"></div>
+            </div>
+            <div class="bubble-tail"></div>
+        </div>
+    </div>
+    
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script>
+        let pyBridge = null;
+        let typingTimer = null;
+        let bubbleSwitchTimer = null;
+        let isTyping = false;
+        let currentText = '';
+        let currentIndex = 0;
+        let fullText = '';
+        let activeMode = 'idle';
+        let streamEnded = false;
+        let globalStreamBuffer = '';
+        let sentenceQueue = [];
+        let currentBubbleRenderQueue = [];
+        let currentBubbleText = '';
+        let streamSessionId = 0;
+        let thinkingPrefixShown = false;
+        let pendingThinkingPrefix = null;
+        let uiScale = 1;
+
+        const MIN_SPEED = 30;
+        const MAX_SPEED = 100;
+
+        const PAUSE_MARKS = {
+            '。': 300, '！': 250, '？': 250,
+            '.': 220, '!': 220, '?': 220,
+            '，': 150, '、': 100, '～': 100, '…': 200,
+            ',': 120, ';': 140, ':': 120
+        };
+
+        const SENTENCE_TERMINATORS = new Set(['。', '！', '？', '.', '!', '?', '\n']);
+        const QUOTE_PAIRS = {
+            '“': '”',
+            '「': '」',
+            '『': '』',
+            '"': '"'
+        };
+        const CLOSING_QUOTES = new Set(['”', '」', '』', '"']);
+
+        const SEMANTIC_BREAKS = [
+            '其实', '那个', '就是说', '怎么说呢', '然后', '所以',
+            '但是', '不过', '而且', '因为', '虽然', '如果',
+            '我觉得', '我认为', '我想', '你知道吗', '其实啊'
+        ];
+
+        const EMOTION_STUTTER = {
+            '我喜欢': { type: 'before', delay: 500 },
+            '我爱你': { type: 'before', delay: 600 },
+            '那个...': { type: 'after', delay: 400 },
+            '我...': { type: 'after', delay: 500 },
+            '其实我': { type: 'after', delay: 300 },
+            '一直想': { type: 'after', delay: 200 },
+            '喜欢你': { type: 'before', delay: 400 }
+        };
+
+        const THINKING_PREFIXES = [
+            { text: '唔...', minLength: 25, delay: 1000 },
+            { text: '呃...', minLength: 35, delay: 1200 },
+            { text: '那个...', minLength: 20, delay: 800 },
+            { text: '让我想想...', minLength: 50, delay: 1500 },
+            { text: '嗯...', minLength: 15, delay: 800 }
+        ];
+
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            pyBridge = channel.objects.pyBridge;
+            if (pyBridge && pyBridge.onBubbleReady) {
+                pyBridge.onBubbleReady();
+            }
+        });
+
+        function stopAllTimers() {
+            if (typingTimer) {
+                clearTimeout(typingTimer);
+                typingTimer = null;
+            }
+            if (bubbleSwitchTimer) {
+                clearTimeout(bubbleSwitchTimer);
+                bubbleSwitchTimer = null;
+            }
+        }
+
+        function resetStreamState(clearText) {
+            streamEnded = false;
+            globalStreamBuffer = '';
+            sentenceQueue = [];
+            currentBubbleRenderQueue = [];
+            currentBubbleText = '';
+            isTyping = false;
+            thinkingPrefixShown = false;
+            pendingThinkingPrefix = null;
+            if (clearText) {
+                var message = document.getElementById('message');
+                message.textContent = '';
+                setTimeout(adjustSize, 20);
+            }
+        }
+
+        function splitBufferToSentences(buffer) {
+            const sentences = [];
+            let quoteStack = [];
+            let pendingQuotedTerminator = false;
+            let start = 0;
+
+            for (let i = 0; i < buffer.length; i++) {
+                const ch = buffer[i];
+                const top = quoteStack.length > 0 ? quoteStack[quoteStack.length - 1] : null;
+
+                if (QUOTE_PAIRS[ch]) {
+                    if (ch === '"' && top === '"') {
+                        quoteStack.pop();
+                        if (pendingQuotedTerminator && quoteStack.length === 0) {
+                            const piece = buffer.slice(start, i + 1);
+                            if (piece.trim().length > 0) {
+                                sentences.push(piece);
+                            }
+                            start = i + 1;
+                            pendingQuotedTerminator = false;
+                        }
+                    } else {
+                        quoteStack.push(QUOTE_PAIRS[ch]);
+                    }
+                } else if (CLOSING_QUOTES.has(ch) && top === ch) {
+                    quoteStack.pop();
+                    if (pendingQuotedTerminator && quoteStack.length === 0) {
+                        const piece = buffer.slice(start, i + 1);
+                        if (piece.trim().length > 0) {
+                            sentences.push(piece);
+                        }
+                        start = i + 1;
+                        pendingQuotedTerminator = false;
+                    }
+                }
+
+                if (SENTENCE_TERMINATORS.has(ch)) {
+                    if (ch === '.') {
+                        const prevIsDot = i > 0 && buffer[i - 1] === '.';
+                        const nextIsDot = i + 1 < buffer.length && buffer[i + 1] === '.';
+                        if (prevIsDot || nextIsDot) {
+                            if (nextIsDot) {
+                                continue;
+                            }
+                        }
+                    }
+                    if (ch === '\n') {
+                        const piece = buffer.slice(start, i + 1);
+                        if (piece.trim().length > 0) {
+                            sentences.push(piece);
+                        }
+                        start = i + 1;
+                        pendingQuotedTerminator = false;
+                    } else if (quoteStack.length === 0) {
+                        const piece = buffer.slice(start, i + 1);
+                        if (piece.trim().length > 0) {
+                            sentences.push(piece);
+                        }
+                        start = i + 1;
+                        pendingQuotedTerminator = false;
+                    } else {
+                        pendingQuotedTerminator = true;
+                    }
+                }
+            }
+
+            return {
+                sentences: sentences,
+                remaining: buffer.slice(start)
+            };
+        }
+
+        function extractSentencesFromStreamBuffer() {
+            const result = splitBufferToSentences(globalStreamBuffer);
+            globalStreamBuffer = result.remaining;
+            for (let i = 0; i < result.sentences.length; i++) {
+                sentenceQueue.push(result.sentences[i]);
+            }
+        }
+
+        function updateMessageWithCursor(text) {
+            var message = document.getElementById('message');
+            message.innerHTML = text + '<span class="cursor"></span>';
+        }
+
+        function finishCurrentBubble(sessionId) {
+            if (sessionId !== streamSessionId || activeMode !== 'stream') {
+                return;
+            }
+            var message = document.getElementById('message');
+            message.textContent = currentBubbleText;
+            setTimeout(adjustSize, 20);
+            scrollToBottom();
+
+            const shouldContinue = sentenceQueue.length > 0 || (!streamEnded && globalStreamBuffer.length > 0);
+            if (shouldContinue) {
+                bubbleSwitchTimer = setTimeout(function() {
+                    if (sessionId !== streamSessionId || activeMode !== 'stream') {
+                        return;
+                    }
+                    bubbleSwitchTimer = null;
+                    currentBubbleText = '';
+                    message.textContent = '';
+                    setTimeout(adjustSize, 20);
+                    processStreamRenderQueue(sessionId);
+                }, 1000);
+            } else if (pyBridge && pyBridge.onTypingComplete) {
+                pyBridge.onTypingComplete();
+            }
+        }
+
+        function processStreamRenderQueue(sessionId) {
+            if (sessionId !== streamSessionId || activeMode !== 'stream') {
+                return;
+            }
+            if (isTyping || bubbleSwitchTimer) {
+                return;
+            }
+            
+            // 首次渲染前检查是否需要显示思考前置词
+            if (!thinkingPrefixShown && sentenceQueue.length > 0) {
+                const bubble = document.getElementById('bubble');
+                bubble.classList.remove('thinking');
+                
+                const firstSentence = sentenceQueue[0];
+                const prefix = getThinkingPrefix(firstSentence);
+                if (prefix) {
+                    thinkingPrefixShown = true;
+                    pendingThinkingPrefix = prefix;
+                    var message = document.getElementById('message');
+                    message.innerHTML = prefix.text + '<span class="cursor"></span>';
+                    setTimeout(adjustSize, 50);
+                    
+                    bubbleSwitchTimer = setTimeout(function() {
+                        if (sessionId !== streamSessionId || activeMode !== 'stream') {
+                            return;
+                        }
+                        bubbleSwitchTimer = null;
+                        message.textContent = '';
+                        setTimeout(adjustSize, 20);
+                        doProcessStreamRenderQueue(sessionId);
+                    }, prefix.delay);
+                    return;
+                }
+                thinkingPrefixShown = true;
+            }
+            
+            doProcessStreamRenderQueue(sessionId);
+        }
+        
+        function doProcessStreamRenderQueue(sessionId) {
+            if (sessionId !== streamSessionId || activeMode !== 'stream') {
+                return;
+            }
+            if (isTyping || bubbleSwitchTimer) {
+                return;
+            }
+            
+            // 移除思考动画样式
+            const bubble = document.getElementById('bubble');
+            bubble.classList.remove('thinking');
+            
+            if (currentBubbleRenderQueue.length === 0 && sentenceQueue.length > 0) {
+                const sentence = sentenceQueue.shift();
+                currentBubbleRenderQueue = Array.from(sentence);
+                currentBubbleText = '';
+            }
+            if (currentBubbleRenderQueue.length === 0) {
+                return;
+            }
+            renderNextStreamChar(sessionId);
+        }
+
+        function renderNextStreamChar(sessionId) {
+            if (sessionId !== streamSessionId || activeMode !== 'stream') {
+                return;
+            }
+            if (currentBubbleRenderQueue.length === 0) {
+                isTyping = false;
+                finishCurrentBubble(sessionId);
+                return;
+            }
+
+            isTyping = true;
+            const char = currentBubbleRenderQueue.shift();
+            currentBubbleText += char;
+            updateMessageWithCursor(currentBubbleText);
+
+            if (currentBubbleText.length % 3 === 0) {
+                adjustSize();
+            }
+            scrollToBottom();
+
+            const delay = calculateDelay(char, currentBubbleText.length, currentBubbleText, currentBubbleText.length);
+            typingTimer = setTimeout(function() {
+                typingTimer = null;
+                renderNextStreamChar(sessionId);
+            }, delay);
+        }
+
+        function showMessage(text, isThinking) {
+            const bubble = document.getElementById('bubble');
+            const message = document.getElementById('message');
+
+            stopAllTimers();
+            isTyping = false;
+            activeMode = isThinking ? 'thinking' : 'single';
+            streamSessionId++;
+            resetStreamState(false);
+
+            if (isThinking) {
+                bubble.classList.add('thinking');
+                message.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div>';
+                setTimeout(adjustSize, 50);
+                return;
+            }
+
+            bubble.classList.remove('thinking');
+            fullText = text || '';
+            currentText = '';
+            currentIndex = 0;
+
+            const thinkingPrefix = getThinkingPrefix(fullText);
+            if (thinkingPrefix) {
+                message.innerHTML = thinkingPrefix.text + '<span class="cursor"></span>';
+                setTimeout(adjustSize, 50);
+                setTimeout(function() {
+                    if (activeMode !== 'single') {
+                        return;
+                    }
+                    message.textContent = '';
+                    startTypewriter();
+                }, thinkingPrefix.delay);
+            } else {
+                startTypewriter();
+            }
+        }
+
+        function startStream() {
+            const bubble = document.getElementById('bubble');
+            const message = document.getElementById('message');
+            bubble.classList.remove('thinking');
+            stopAllTimers();
+            streamSessionId++;
+            activeMode = 'stream';
+            resetStreamState(true);
+            
+            // 显示思考动画（跳动的点）
+            bubble.classList.add('thinking');
+            message.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div>';
+            setTimeout(adjustSize, 50);
+        }
+
+        function appendStreamChunk(text) {
+            if (activeMode !== 'stream') {
+                startStream();
+            }
+            if (!text) {
+                return;
+            }
+            globalStreamBuffer += text;
+            extractSentencesFromStreamBuffer();
+            processStreamRenderQueue(streamSessionId);
+        }
+
+        function finalizeStream() {
+            if (activeMode !== 'stream') {
+                return;
+            }
+            streamEnded = true;
+            if (globalStreamBuffer.length > 0) {
+                sentenceQueue.push(globalStreamBuffer);
+                globalStreamBuffer = '';
+            }
+            processStreamRenderQueue(streamSessionId);
+            if (!isTyping && !bubbleSwitchTimer && sentenceQueue.length === 0 && currentBubbleRenderQueue.length === 0 && pyBridge && pyBridge.onTypingComplete) {
+                pyBridge.onTypingComplete();
+            }
+        }
+
+        function interruptStream() {
+            stopAllTimers();
+            streamSessionId++;
+            activeMode = 'idle';
+            resetStreamState(true);
+            const bubble = document.getElementById('bubble');
+            bubble.classList.remove('thinking');
+            if (pyBridge && pyBridge.onTypingSkipped) {
+                pyBridge.onTypingSkipped();
+            }
+        }
+
+        function getThinkingPrefix(text) {
+            if (!text || text.length < 15) return null;
+            for (var i = 0; i < THINKING_PREFIXES.length; i++) {
+                var prefix = THINKING_PREFIXES[i];
+                if (text.length >= prefix.minLength) {
+                    return prefix;
+                }
+            }
+            return null;
+        }
+
+        function startTypewriter() {
+            isTyping = true;
+            typeNextChar();
+        }
+
+        function typeNextChar() {
+            if (!isTyping || currentIndex >= fullText.length) {
+                isTyping = false;
+                const message = document.getElementById('message');
+                message.textContent = fullText;
+                setTimeout(adjustSize, 50);
+                scrollToBottom();
+                if (pyBridge && pyBridge.onTypingComplete) {
+                    pyBridge.onTypingComplete();
+                }
+                return;
+            }
+
+            const char = fullText[currentIndex];
+            currentText += char;
+            currentIndex++;
+
+            updateMessageWithCursor(currentText);
+            if (currentIndex % 3 === 0) {
+                adjustSize();
+            }
+            scrollToBottom();
+
+            const delay = calculateDelay(char, currentIndex, currentText, fullText.length);
+            typingTimer = setTimeout(typeNextChar, delay);
+        }
+
+        function scrollToBottom() {
+            const bubble = document.getElementById('bubble');
+            bubble.scrollTop = bubble.scrollHeight;
+        }
+
+        function calculateDelay(char, index, typedText, totalLength) {
+            const lengthRef = Math.max(totalLength || 0, 1);
+            let delay = Math.max(MIN_SPEED, MAX_SPEED - lengthRef * 0.3);
+
+            if (PAUSE_MARKS[char]) {
+                delay += PAUSE_MARKS[char];
+            }
+
+            for (let i = 0; i < SEMANTIC_BREAKS.length; i++) {
+                const word = SEMANTIC_BREAKS[i];
+                const startPos = typedText.lastIndexOf(word);
+                if (startPos !== -1 && startPos + word.length === typedText.length) {
+                    delay += 100;
+                    break;
+                }
+            }
+
+            for (const key in EMOTION_STUTTER) {
+                const config = EMOTION_STUTTER[key];
+                const pos = typedText.indexOf(key);
+                if (pos !== -1) {
+                    if (config.type === 'before' && index - 1 === pos) {
+                        delay += config.delay;
+                    } else if (config.type === 'after' && index === pos + key.length) {
+                        delay += config.delay;
+                    }
+                }
+            }
+
+            return delay;
+        }
+
+        function skipTyping() {
+            if (activeMode === 'stream') {
+                interruptStream();
+                return;
+            }
+
+            if (typingTimer) {
+                clearTimeout(typingTimer);
+                typingTimer = null;
+            }
+            isTyping = false;
+            const message = document.getElementById('message');
+            message.textContent = fullText;
+            setTimeout(adjustSize, 50);
+            scrollToBottom();
+            if (pyBridge && pyBridge.onTypingSkipped) {
+                pyBridge.onTypingSkipped();
+            }
+        }
+
+        function adjustSize() {
+            const bubble = document.getElementById('bubble');
+            const tail = document.querySelector('.bubble-tail');
+            const contentHeight = bubble.scrollHeight;
+            const maxHeight = 300;
+            const bubbleHeight = Math.min(contentHeight + 24, maxHeight);
+            const tailHeight = tail ? 12 : 0;
+            const totalHeight = bubbleHeight + 16 + tailHeight + 16;
+            
+            // 确保 root 容器在缩放前是基础高度，避免被父级 body 截断
+            const root = document.getElementById('root');
+            root.style.height = totalHeight + 'px';
+            
+            if (pyBridge && pyBridge.onResize) {
+                pyBridge.onResize(
+                    Math.round(340 * uiScale),
+                    Math.round(totalHeight * uiScale)
+                );
+            }
+        }
+
+        function clearMessage() {
+            stopAllTimers();
+            activeMode = 'idle';
+            resetStreamState(true);
+            const bubble = document.getElementById('bubble');
+            bubble.classList.remove('thinking');
+        }
+
+        function setUiScale(scale) {
+            const parsed = Number(scale);
+            if (!parsed || parsed < 1) {
+                return;
+            }
+            uiScale = parsed;
+            const root = document.getElementById('root');
+            root.style.transform = 'scale(' + uiScale + ')';
+            setTimeout(adjustSize, 20);
+        }
+    </script>
+</body>
+</html>

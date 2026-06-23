@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2D Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+        h1 {
+            color: white;
+            margin: 20px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        #canvas-container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        #live2d-canvas {
+            display: block;
+            background: transparent;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 0 15px;
+            max-width: 800px;
+        }
+        .control-group {
+            background: rgba(255,255,255,0.95);
+            padding: 10px 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .control-group h3 {
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 12px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 4px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            text-align: center;
+        }
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .status {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .status.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <h1>Live2D Mao</h1>
+    <div id="canvas-container">
+        <canvas id="live2d-canvas"></canvas>
+        <div class="loading" id="loading">正在加载模型</div>
+    </div>
+    <div class="controls">
+        <div class="control-group">
+            <h3>表情切换</h3>
+            <div class="btn-group" id="expression-btns"></div>
+        </div>
+        <div class="control-group">
+            <h3>动作播放</h3>
+            <div class="btn-group" id="motion-btns"></div>
+        </div>
+    </div>
+    <div class="status" id="status"></div>
+
+    <script src="../src/utils/live2dcubismcore.min.js"></script>
+    <script src="../src/utils/pixi.min.js"></script>
+    <script src="../src/utils/cubism4.min.js"></script>
+    <script>
+        (async function() {
+            const canvas = document.getElementById('live2d-canvas');
+            const loadingEl = document.getElementById('loading');
+            const statusEl = document.getElementById('status');
+            const expressionBtnsEl = document.getElementById('expression-btns');
+            const motionBtnsEl = document.getElementById('motion-btns');
+
+            const CANVAS_WIDTH = 700;
+            const CANVAS_HEIGHT = 500;
+
+            canvas.width = CANVAS_WIDTH;
+            canvas.height = CANVAS_HEIGHT;
+
+            window.PIXI = PIXI;
+
+            const app = new PIXI.Application({
+                view: canvas,
+                width: CANVAS_WIDTH,
+                height: CANVAS_HEIGHT,
+                backgroundAlpha: 0,
+                resolution: window.devicePixelRatio || 1,
+                autoDensity: true
+            });
+
+            let model = null;
+
+            function showStatus(message) {
+                statusEl.textContent = message;
+                statusEl.classList.add('show');
+                setTimeout(() => statusEl.classList.remove('show'), 2000);
+            }
+
+            const expressions = [
+                'exp_01', 'exp_02', 'exp_03', 'exp_04',
+                'exp_05', 'exp_06', 'exp_07', 'exp_08'
+            ];
+
+            const motions = {
+                'Idle': ['mtn_01', 'sample_01'],
+                'TapBody': ['mtn_02', 'mtn_03', 'mtn_04', 'special_01', 'special_02', 'special_03']
+            };
+
+            expressions.forEach(exp => {
+                const btn = document.createElement('button');
+                btn.textContent = exp;
+                btn.addEventListener('click', () => {
+                    if (model) {
+                        model.expression(exp);
+                        showStatus(`切换表情: ${exp}`);
+                    }
+                });
+                expressionBtnsEl.appendChild(btn);
+            });
+
+            Object.entries(motions).forEach(([group, motionList]) => {
+                motionList.forEach((motion, index) => {
+                    const btn = document.createElement('button');
+                    btn.textContent = motion;
+                    btn.addEventListener('click', () => {
+                        if (model) {
+                            model.motion(group, index);
+                            showStatus(`播放动作: ${motion}`);
+                        }
+                    });
+                    motionBtnsEl.appendChild(btn);
+                });
+            });
+
+            const randomMotionBtn = document.createElement('button');
+            randomMotionBtn.textContent = '随机动作';
+            randomMotionBtn.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';
+            randomMotionBtn.addEventListener('click', () => {
+                if (model) {
+                    const groups = Object.keys(motions);
+                    const randomGroup = groups[Math.floor(Math.random() * groups.length)];
+                    model.motion(randomGroup);
+                    showStatus('播放随机动作');
+                }
+            });
+            motionBtnsEl.appendChild(randomMotionBtn);
+
+            try {
+                model = await PIXI.live2d.Live2DModel.from('models/Mao/Mao.model3.json', {
+                    autoInteract: false
+                });
+
+                app.stage.addChild(model);
+
+                const scale = Math.min(
+                    CANVAS_WIDTH / model.width,
+                    CANVAS_HEIGHT / model.height
+                ) * 0.8;
+
+                model.scale.set(scale);
+                model.x = CANVAS_WIDTH / 2;
+                model.y = CANVAS_HEIGHT * 0.9;
+                model.anchor.set(0.5, 1);
+
+                loadingEl.style.display = 'none';
+
+                canvas.addEventListener('pointermove', (event) => {
+                    if (model) {
+                        const rect = canvas.getBoundingClientRect();
+                        const x = event.clientX - rect.left;
+                        const y = event.clientY - rect.top;
+                        model.focus(x, y);
+                    }
+                });
+
+                model.on('hit', (hitAreas) => {
+                    if (hitAreas.includes('Head')) {
+                        model.expression();
+                        showStatus('点击头部 - 随机表情');
+                    } else if (hitAreas.includes('Body')) {
+                        model.motion('TapBody');
+                        showStatus('点击身体 - 随机动作');
+                    }
+                });
+
+                canvas.addEventListener('pointerdown', (event) => {
+                    if (model) {
+                        const rect = canvas.getBoundingClientRect();
+                        const x = event.clientX - rect.left;
+                        const y = event.clientY - rect.top;
+                        model.tap(x, y);
+                    }
+                });
+
+                showStatus('模型加载完成! 移动鼠标与角色互动');
+
+            } catch (error) {
+                console.error('加载模型失败:', error);
+                loadingEl.textContent = '加载失败: ' + error.message;
+            }
+        })();
+    </script>
+</body>
+</html>
