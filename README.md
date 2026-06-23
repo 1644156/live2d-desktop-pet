@@ -15,6 +15,20 @@
 
 ---
 
+## Demo Screenshots
+
+<p align="center">
+  <img src="picture/Snipaste_2026-06-23_13-26-03.png" alt="Live2D desktop pet demo screenshot 1" width="45%">
+  <img src="picture/Snipaste_2026-06-23_13-26-25.png" alt="Live2D desktop pet demo screenshot 2" width="45%">
+  <br>
+  <img src="picture/Snipaste_2026-06-23_13-27-10.png" alt="Live2D desktop pet demo screenshot 3" width="45%">
+  <img src="picture/Snipaste_2026-06-23_13-27-27.png" alt="Live2D desktop pet demo screenshot 4" width="45%">
+  <br>
+  <img src="picture/Snipaste_2026-06-23_13-27-41.png" alt="Live2D desktop pet demo screenshot 5" width="60%">
+</p>
+
+---
+
 ## 📖 项目简介
 
 Live2D Desktop Pet 是一款基于 Python 开发的桌面宠物应用，将精美的 Live2D 模型与先进的 AI 技术相结合，为用户提供沉浸式的桌面交互体验。它不仅能作为桌面装饰，更是一位能够理解情绪、记住偏好、主动关怀的智能伙伴。
@@ -377,7 +391,6 @@ live2d-desktop-pet/
 - [pixi-live2d-display](https://github.com/pixijs/pixi-live2d-display) - Live2D 渲染库
 - [LangChain](https://github.com/langchain-ai/langchain) - LLM 应用框架
 - [ChromaDB](https://github.com/chroma-core/chroma) - 向量数据库
-- [vsllm](https://vsllm.com) - 模型支持
 - 所有贡献者和用户
 
 ---
